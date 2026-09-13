@@ -272,6 +272,53 @@ int main(int argc, char** argv) {
     say(QStringLiteral("\n===== ① 初始（会话页）控件树 ====="));
     dumpTree(&win, 0, 3);
 
+
+    // ---- ⑨ 截图产出：离屏抓取真实控件，供 README 配图（避免文档长期挂着旧版界面图）----
+    // 页内截图抓的是**页面控件自身**（显式 resize + 强制布局后再 grab）：
+    // 抓整窗需要切页，而切页后立刻 grab 会拿到尚未完成布局的空页（实测：两张图完全相同）。
+    {
+        auto save = [&](const QPixmap& pm, const QString& name) {
+            const bool ok = pm.save(QDir::currentPath() + QStringLiteral("/") + name, "PNG");
+            say(QStringLiteral("  截图 %1 ok=%2 %3x%4").arg(name).arg(ok ? 1 : 0)
+                    .arg(pm.width()).arg(pm.height()));
+        };
+        auto shootPage = [&](QWidget* w, const QString& name) {
+            w->resize(1180, 860);
+            w->show();
+            QCoreApplication::sendPostedEvents();
+            QCoreApplication::processEvents();
+            if (auto* lay = w->layout())
+                lay->activate();
+            QCoreApplication::processEvents();
+            save(w->grab(), name);
+        };
+        say(QStringLiteral("\n===== ⑨ 截图产出 ====="));
+        save(win.grab(), QStringLiteral("shot-session.png")); // 整窗：会话页 + 左栏
+        // SettingsDialog 是惰创建（首次打开才构造）：必须先点开、再抓、再退出
+        if (auto* sbtn = findByText<QPushButton>(&win, [](QPushButton* b) {
+                return b->text().contains(QStringLiteral("设置"));
+            })) {
+            sbtn->click();
+            app.processEvents();
+            if (auto* settingsW = findByText<QWidget>(&win, [](QWidget* w) {
+                    return QString::fromLatin1(w->metaObject()->className())
+                        .contains(QStringLiteral("SettingsDialog"));
+                })) {
+                shootPage(settingsW, QStringLiteral("shot-settings.png"));
+            }
+            sbtn->click();
+            app.processEvents();
+        }
+        if (auto* paneW = findByText<QWidget>(&win, [](QWidget* w) {
+                return QString::fromLatin1(w->metaObject()->className())
+                    .contains(QStringLiteral("PreviewPane"));
+            })) {
+            auto* pane = static_cast<miderforge::PreviewPane*>(paneW);
+            pane->openFile(tmp.path() + QStringLiteral("/说明.md"));
+            shootPage(paneW, QStringLiteral("shot-viewer.png"));
+        }
+    }
+
     // 会话行内动作：默认隐藏归档项；**程序化点击行内"归档"图标**应真的把会话归档
     {
         // 必须定向到左栏自己的列表：findChild 会先命中技能页的 QListWidget
@@ -325,8 +372,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    say(QStringLiteral("\n===== ① 初始（会话页）控件树 ====="));
-    dumpTree(&win, 0, 3);
 
     QWidget* cw = win.centralWidget();
     say(QStringLiteral("\n[判定] 中央区 %1").arg(rect(cw->geometry())));
